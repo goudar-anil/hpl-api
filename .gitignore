@@ -3,3 +3,11 @@ dist/
 .env
 .env.*
 !.env.example
+
+.agents
+.claude
+.cursor
+.devin
+
+src/generated/
+prisma/

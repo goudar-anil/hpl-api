@@ -1,6 +1,6 @@
 import fastify from "fastify";
 import { config } from "./config/index.js";
-import sqlClient from "./config/database.js";
+import prisma from "./config/database.js";
 
 const app = fastify({
     logger: true
@@ -16,13 +16,11 @@ app.get('/health', async () => {
 
 app.get("/health/db", async (_request, reply) => {
   try {
-    const result = await sqlClient`SELECT 1 AS connected`;
+    await prisma.$queryRaw`SELECT 1`;
 
     return {
       status: "ok",
-      database: result[0].connected === 1
-        ? "connected"
-        : "unknown",
+      database: "connected",
     };
   } catch (error) {
     app.log.error({ err: error }, "Database health check failed");
