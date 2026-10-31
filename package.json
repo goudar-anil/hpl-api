@@ -21,10 +21,13 @@
   },
   "homepage": "https://github.com/goudar-anil/hpl-api#readme",
   "dependencies": {
+    "@fastify/multipart": "^10.1.6",
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
+    "@supabase/supabase-js": "^2.118.0",
     "dotenv": "^18.0.9",
     "fastify": "^5.12.7",
+    "file-type": "^22.3.0",
     "pg": "^8.23.1",
     "zod": "^4.6.7"
   },

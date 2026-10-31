@@ -1,10 +1,22 @@
 import fastify from "fastify";
 import { config } from "./config/index.js";
 import prisma from "./config/database.js";
+import { playerRoutes } from "./modules/players/players.route.js";
+import multipart from "@fastify/multipart";
 
 const app = fastify({
     logger: true
 });
+
+
+await app.register(multipart, {
+limits: {
+    fileSize: 5 * 1024 * 1024, // 5 MB
+    files: 1,                  // One photo per registration
+    fields: 10,                // Maximum 10 text fields
+  },
+});
+await app.register(playerRoutes);
 
 app.get('/health', async () => {
     return {

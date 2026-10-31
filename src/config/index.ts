@@ -24,4 +24,9 @@ export const config = {
   port: getPort(),
   host: process.env.HOST || "127.0.0.1",
   databaseUrl: requiredEnv("DATABASE_URL"),
+
+  // Supabase configuration
+  supabaseUrl: requiredEnv("SUPABASE_URL"),
+  supabaseServiceRoleKey: requiredEnv("SUPABASE_SERVICE_ROLE_KEY"),
+  supabaseStorageBucket: requiredEnv("SUPABASE_STORAGE_BUCKET"),
 } as const;
