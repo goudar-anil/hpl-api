@@ -1,0 +1,1 @@
+export const INVALID_PLAYER_DETAILS = "Please check the details once again to register!"
