@@ -3,11 +3,19 @@ import { config } from "./config/index.js";
 import prisma from "./config/database.js";
 import { playerRoutes } from "./modules/players/players.route.js";
 import multipart from "@fastify/multipart";
+import cors from "@fastify/cors";
 
 const app = fastify({
     logger: true
 });
 
+await app.register(cors, {
+  origin: [
+    "*",
+    "*"
+  ],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+});
 
 await app.register(multipart, {
 limits: {

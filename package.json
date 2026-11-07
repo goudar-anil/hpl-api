@@ -21,6 +21,7 @@
   },
   "homepage": "https://github.com/goudar-anil/hpl-api#readme",
   "dependencies": {
+    "@fastify/cors": "^11.4.1",
     "@fastify/multipart": "^10.1.6",
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
