@@ -8,6 +8,3 @@ dist/
 .claude
 .cursor
 .devin
-
-src/generated/
-prisma/
