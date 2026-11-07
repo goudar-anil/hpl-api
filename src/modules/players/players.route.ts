@@ -1,4 +1,3 @@
-
 import type { FastifyInstance } from "fastify";
 import { Prisma } from "../../generated/prisma/client.js";
 import prisma from "../../config/database.js";
@@ -13,14 +12,18 @@ import {
 import {
   uploadPlayerPhoto,
   deletePlayerPhoto,
+  getPlayerPhotoUrl,
 } from "./player-photo.service.js";
+import {
+  uploadPaymentProof,
+  deletePaymentProof,
+} from "./payment-proof.service.js";
 import z from "zod";
 
 export async function playerRoutes(app: FastifyInstance) {
 
-  // POST: Register player with photo
+  // POST: Register player with photo and payment proof
   app.post("/api/v1/players", async (request, reply) => {
-
     if (!request.isMultipart()) {
       return reply.code(415).send({
         error: {
@@ -32,32 +35,57 @@ export async function playerRoutes(app: FastifyInstance) {
 
     const fields: Record<string, string> = {};
     let photoBuffer: Buffer | undefined;
+    let paymentProofBuffer: Buffer | undefined;
+
+    let uploadedPhoto:
+      | Awaited<ReturnType<typeof uploadPlayerPhoto>>
+      | undefined;
+
+    let uploadedPaymentProof:
+      | Awaited<ReturnType<typeof uploadPaymentProof>>
+      | undefined;
 
     try {
-      // 1. Read multipart fields and photo
-      for await (const part of request.parts()) {
-
+      // 1. Read multipart fields and both images
+      for await (const part of request.parts({
+        limits: {
+          files: 2,
+          fields: 5,
+          parts: 7,
+        },
+      })) {
         if (part.type === "file") {
-          if (part.fieldname !== "photo") {
+          if (part.fieldname === "photo") {
+            if (photoBuffer) {
+              return reply.code(400).send({
+                error: {
+                  code: "MULTIPLE_PHOTOS",
+                  message: "Only one player photo is allowed.",
+                },
+              });
+            }
+
+            photoBuffer = await part.toBuffer();
+          } else if (part.fieldname === "paymentProof") {
+            if (paymentProofBuffer) {
+              return reply.code(400).send({
+                error: {
+                  code: "MULTIPLE_PAYMENT_PROOFS",
+                  message: "Only one payment screenshot is allowed.",
+                },
+              });
+            }
+
+            paymentProofBuffer = await part.toBuffer();
+          } else {
             return reply.code(400).send({
               error: {
                 code: "INVALID_FILE_FIELD",
-                message: "Please upload the image using the 'photo' field.",
+                message:
+                  "Use 'photo' for the player photo and 'paymentProof' for the payment screenshot.",
               },
             });
           }
-
-          if (photoBuffer) {
-            return reply.code(400).send({
-              error: {
-                code: "MULTIPLE_PHOTOS",
-                message: "Only one photo is allowed.",
-              },
-            });
-          }
-
-          photoBuffer = await part.toBuffer();
-
         } else {
           if (typeof part.value !== "string") {
             return reply.code(400).send({
@@ -85,7 +113,7 @@ export async function playerRoutes(app: FastifyInstance) {
         });
       }
 
-      // 3. Photo is mandatory
+      // 3. Both images are mandatory
       if (!photoBuffer) {
         return reply.code(400).send({
           error: {
@@ -95,64 +123,91 @@ export async function playerRoutes(app: FastifyInstance) {
         });
       }
 
+      if (!paymentProofBuffer) {
+        return reply.code(400).send({
+          error: {
+            code: "PAYMENT_PROOF_REQUIRED",
+            message: "Please upload your ₹50 payment screenshot.",
+          },
+        });
+      }
+
       const playerData = parsedSchema.data;
 
-      // 4. Upload photo to Supabase
-      const uploadedPhoto = await uploadPlayerPhoto(photoBuffer);
+      // 4. Upload player photo
+      uploadedPhoto = await uploadPlayerPhoto(photoBuffer);
 
-      try {
-        // 5. Save player details and photo path in PostgreSQL
-        const player = await prisma.player.create({
-          data: {
-            fullName: playerData.fullName,
-            phone: playerData.phone,
-            dob: new Date(`${playerData.dob}T00:00:00.000Z`),
-            playingRole: playerData.playingRole,
-            village: playerData.village,
-            photoPath: uploadedPhoto.photoPath,
-          },
-          select: {
-            id: true,
-            fullName: true,
-            phone: true,
-            dob: true,
-            playingRole: true,
-            village: true,
-            photoPath: true,
-            registrationStatus: true,
-            paymentStatus: true,
-            createdAt: true,
-          },
-        });
+      // 5. Upload payment screenshot to private bucket
+      uploadedPaymentProof = await uploadPaymentProof(
+        // Temporary identifier is not needed here.
+        // The service currently expects playerId, so see note below.
+        playerData.phone,
+        paymentProofBuffer,
+      );
 
-        // 6. Return the registered player
-        return reply.code(201).send({
-          message: "Player registered successfully",
-          data: {
-            ...player,
-            dob: player.dob.toISOString().slice(0, 10),
-            photoUrl: uploadedPhoto.photoUrl,
-          },
-        });
+      // 6. Create player record
+      const player = await prisma.player.create({
+        data: {
+          fullName: playerData.fullName,
+          phone: playerData.phone,
+          dob: new Date(`${playerData.dob}T00:00:00.000Z`),
+          playingRole: playerData.playingRole,
+          village: playerData.village,
+          photoPath: uploadedPhoto.photoPath,
+          paymentStatus: "NOT_REVIEWED",
+          paymentProofPath: uploadedPaymentProof.proofPath,
+          paymentSubmittedAt: new Date(),
+        },
+        select: {
+          id: true,
+          fullName: true,
+          phone: true,
+          dob: true,
+          playingRole: true,
+          village: true,
+          photoPath: true,
+          registrationStatus: true,
+          paymentStatus: true,
+          createdAt: true,
+        },
+      });
 
-      } catch (dbError) {
+      // 7. Return registered player
+      return reply.code(201).send({
+        message: "Player registered successfully. Payment is awaiting verification.",
+        data: {
+          ...player,
+          dob: player.dob.toISOString().slice(0, 10),
+          photoUrl: uploadedPhoto.photoUrl,
+        },
+      });
 
-        // 7. Remove uploaded photo if database insertion fails
+    } catch (error) {
+
+      // 8. Clean up uploaded files if registration fails
+      if (uploadedPaymentProof) {
+        try {
+          await deletePaymentProof(uploadedPaymentProof.proofPath);
+        } catch (cleanupError) {
+          app.log.error(
+            { err: cleanupError },
+            "Failed to clean up payment proof",
+          );
+        }
+      }
+
+      if (uploadedPhoto) {
         try {
           await deletePlayerPhoto(uploadedPhoto.photoPath);
         } catch (cleanupError) {
           app.log.error(
-            { err: cleanupError, photoPath: uploadedPhoto.photoPath },
-            "Failed to clean up uploaded player photo",
+            { err: cleanupError },
+            "Failed to clean up player photo",
           );
         }
-
-        throw dbError;
       }
 
-    } catch (error) {
-
-      // File size limit exceeded by Fastify multipart
+      // Multipart file size exceeded
       if (
         typeof error === "object" &&
         error !== null &&
@@ -161,13 +216,13 @@ export async function playerRoutes(app: FastifyInstance) {
       ) {
         return reply.code(413).send({
           error: {
-            code: "PHOTO_TOO_LARGE",
-            message: "Photo size cannot exceed 5 MB.",
+            code: "FILE_TOO_LARGE",
+            message: "Each image must be under 5 MB.",
           },
         });
       }
 
-      // Photo validation errors from upload service
+      // Image validation errors
       if (
         error instanceof Error &&
         [
@@ -179,7 +234,23 @@ export async function playerRoutes(app: FastifyInstance) {
         return reply.code(400).send({
           error: {
             code: error.message,
-            message: "Please upload a valid JPEG, PNG or WebP photo under 5 MB.",
+            message: "Please upload a valid JPEG, PNG or WebP player photo under 5 MB.",
+          },
+        });
+      }
+
+      if (
+        error instanceof Error &&
+        [
+          "EMPTY_PAYMENT_PROOF",
+          "PAYMENT_PROOF_TOO_LARGE",
+          "INVALID_PAYMENT_PROOF_TYPE",
+        ].includes(error.message)
+      ) {
+        return reply.code(400).send({
+          error: {
+            code: error.message,
+            message: "Please upload a valid JPEG, PNG or WebP payment screenshot under 5 MB.",
           },
         });
       }
@@ -208,10 +279,8 @@ export async function playerRoutes(app: FastifyInstance) {
     }
   });
 
-
   // GET: Fetch players with pagination
   app.get("/api/v1/players", async (request, reply) => {
-
     const querySchema = z.object({
       page: z.coerce.number().int().min(1).default(1),
       limit: z.coerce.number().int().min(1).max(1000).default(100),
@@ -243,6 +312,7 @@ export async function playerRoutes(app: FastifyInstance) {
             fullName: true,
             playingRole: true,
             village: true,
+            photoPath: true,
             registrationStatus: true,
             createdAt: true,
           },
@@ -251,7 +321,10 @@ export async function playerRoutes(app: FastifyInstance) {
       ]);
 
       return reply.code(200).send({
-        data: players,
+        data: players.map(({ photoPath, ...player }) => ({
+          ...player,
+          photoUrl: photoPath ? getPlayerPhotoUrl(photoPath) : null,
+        })),
         pagination: {
           page,
           limit,

@@ -29,4 +29,5 @@ export const config = {
   supabaseUrl: requiredEnv("SUPABASE_URL"),
   supabaseServiceRoleKey: requiredEnv("SUPABASE_SERVICE_ROLE_KEY"),
   supabaseStorageBucket: requiredEnv("SUPABASE_STORAGE_BUCKET"),
+  supabasePaymentStorageBucket: requiredEnv("SUPABASE_PAYMENT_STORAGE_BUCKET")
 } as const;
